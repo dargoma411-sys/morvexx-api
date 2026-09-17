@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 from datetime import datetime
+import os
 
 app = FastAPI()
 
@@ -12,10 +13,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-conn = sqlite3.connect('morvexx_shop.db', check_same_thread=False)
+# База данных — удаляем старую при запуске (для Render)
+DB_PATH = 'morvexx_shop.db'
+if os.path.exists(DB_PATH):
+    os.remove(DB_PATH)
+
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
-# Таблица заказов со статусом
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +116,6 @@ async def get_profile(user_id: int):
         "total_spent_text": format_number(round(total, 2)),
     }
 
-# Отменить заказ (клиент)
 @app.post("/api/orders/{order_id}/cancel")
 async def cancel_order(order_id: int, request: Request):
     data = await request.json()
@@ -129,9 +133,25 @@ async def cancel_order(order_id: int, request: Request):
     conn.commit()
     return {"success": True}
 
-# Выполнить заказ (админ)
 @app.post("/api/orders/{order_id}/complete")
 async def complete_order(order_id: int):
     cursor.execute("UPDATE orders SET status='completed' WHERE id=?", (order_id,))
+    conn.commit()
+    return {"success": True}
+
+@app.post("/api/orders/{order_id}/delete")
+async def delete_order(order_id: int, request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+
+    cursor.execute("SELECT status FROM orders WHERE id=? AND user_id=?", (order_id, user_id))
+    row = cursor.fetchone()
+
+    if not row:
+        return {"error": "Заказ не найден"}
+    if row[0] != "cancelled":
+        return {"error": "Можно удалить только отменённые заказы"}
+
+    cursor.execute("DELETE FROM orders WHERE id=?", (order_id,))
     conn.commit()
     return {"success": True}
