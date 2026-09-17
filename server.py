@@ -17,6 +17,22 @@ app.add_middleware(
 conn = sqlite3.connect('morvexx_shop.db', check_same_thread=False)
 cursor = conn.cursor()
 
+# Создаём таблицу заказов (если её ещё нет)
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        username TEXT,
+        category TEXT,
+        quantity INTEGER,
+        unit TEXT,
+        price REAL,
+        currency TEXT,
+        created_at TEXT
+    )
+''')
+conn.commit()
+
 # Категории (те же, что в боте)
 CATEGORIES = {
     "cat_stars": {"name": "⭐ Telegram Stars", "min": 100, "max": 100000, "unit": "звёзд", "rate": 1.45},
