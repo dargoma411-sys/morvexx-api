@@ -5,7 +5,6 @@ from datetime import datetime
 
 app = FastAPI()
 
-# Разрешаем запросы откуда угодно (чтобы Mini App мог общаться)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,11 +12,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# База данных
 conn = sqlite3.connect('morvexx_shop.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Создаём таблицу заказов (если её ещё нет)
+# Таблица заказов со статусом
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,12 +26,12 @@ cursor.execute('''
         unit TEXT,
         price REAL,
         currency TEXT,
+        status TEXT DEFAULT 'pending',
         created_at TEXT
     )
 ''')
 conn.commit()
 
-# Категории (те же, что в боте)
 CATEGORIES = {
     "cat_stars": {"name": "⭐ Telegram Stars", "min": 100, "max": 100000, "unit": "звёзд", "rate": 1.45},
     "cat_robux": {"name": "🎮 Robux", "min": 100, "max": 1000000, "unit": "Robux", "rate": 1.1},
@@ -42,18 +40,15 @@ CATEGORIES = {
     "cat_brawl": {"name": "💎 Brawl Stars Gems", "min": 100, "max": 10000, "unit": "гемов", "rate": 1.2},
 }
 
-# Форматирование чисел
 def format_number(n) -> str:
     if isinstance(n, float):
         return f"{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{n:,}".replace(",", ".")
 
-# 1. Получить список категорий
 @app.get("/api/categories")
 async def get_categories():
     return CATEGORIES
 
-# 2. Создать заказ
 @app.post("/api/orders")
 async def create_order(request: Request):
     data = await request.json()
@@ -72,9 +67,9 @@ async def create_order(request: Request):
     price = quantity * cat["rate"]
 
     cursor.execute(
-        "INSERT INTO orders (user_id, username, category, quantity, unit, price, currency, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (user_id, username, category, quantity, cat["unit"], price, None, datetime.now().isoformat())
+        "INSERT INTO orders (user_id, username, category, quantity, unit, price, currency, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (user_id, username, category, quantity, cat["unit"], price, None, "pending", datetime.now().isoformat())
     )
     conn.commit()
 
@@ -85,16 +80,15 @@ async def create_order(request: Request):
         "price_text": format_number(round(price, 2)),
     }
 
-# 3. Получить заказы пользователя
 @app.get("/api/orders/{user_id}")
 async def get_orders(user_id: int):
     cursor.execute(
-        "SELECT id, category, quantity, unit, price FROM orders WHERE user_id=? ORDER BY id DESC",
+        "SELECT id, category, quantity, unit, price, status FROM orders WHERE user_id=? ORDER BY id DESC",
         (user_id,)
     )
     orders = cursor.fetchall()
     result = []
-    for oid, cat, qty, unit, price in orders:
+    for oid, cat, qty, unit, price, status in orders:
         result.append({
             "id": oid,
             "category": cat,
@@ -103,10 +97,10 @@ async def get_orders(user_id: int):
             "unit": unit,
             "price": round(price, 2),
             "price_text": format_number(round(price, 2)),
+            "status": status,
         })
     return result
 
-# 4. Профиль
 @app.get("/api/profile/{user_id}")
 async def get_profile(user_id: int):
     cursor.execute("SELECT COUNT(*), COALESCE(SUM(price), 0) FROM orders WHERE user_id=?", (user_id,))
@@ -116,3 +110,28 @@ async def get_profile(user_id: int):
         "total_spent": round(total, 2),
         "total_spent_text": format_number(round(total, 2)),
     }
+
+# Отменить заказ (клиент)
+@app.post("/api/orders/{order_id}/cancel")
+async def cancel_order(order_id: int, request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+
+    cursor.execute("SELECT status FROM orders WHERE id=? AND user_id=?", (order_id, user_id))
+    row = cursor.fetchone()
+
+    if not row:
+        return {"error": "Заказ не найден"}
+    if row[0] != "pending":
+        return {"error": "Можно отменить только заказы в обработке"}
+
+    cursor.execute("UPDATE orders SET status='cancelled' WHERE id=?", (order_id,))
+    conn.commit()
+    return {"success": True}
+
+# Выполнить заказ (админ)
+@app.post("/api/orders/{order_id}/complete")
+async def complete_order(order_id: int):
+    cursor.execute("UPDATE orders SET status='completed' WHERE id=?", (order_id,))
+    conn.commit()
+    return {"success": True}
