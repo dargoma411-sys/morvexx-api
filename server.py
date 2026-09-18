@@ -155,3 +155,41 @@ async def delete_order(order_id: int, request: Request):
     cursor.execute("DELETE FROM orders WHERE id=?", (order_id,))
     conn.commit()
     return {"success": True}
+
+# ===== АДМИН-ЭНДПОИНТЫ =====
+
+@app.get("/api/admin/orders")
+async def get_all_orders():
+    cursor.execute(
+        "SELECT id, user_id, username, category, quantity, unit, price, status, created_at "
+        "FROM orders ORDER BY id DESC"
+    )
+    orders = cursor.fetchall()
+    result = []
+    for oid, uid, uname, cat, qty, unit, price, status, created in orders:
+        result.append({
+            "id": oid,
+            "user_id": uid,
+            "username": uname,
+            "category": cat,
+            "category_name": CATEGORIES.get(cat, {}).get("name", "Неизвестно"),
+            "quantity": qty,
+            "unit": unit,
+            "price": round(price, 2),
+            "price_text": format_number(round(price, 2)),
+            "status": status,
+            "created_at": created,
+        })
+    return result
+
+@app.post("/api/admin/orders/{order_id}/complete")
+async def admin_complete_order(order_id: int):
+    cursor.execute("UPDATE orders SET status='completed' WHERE id=?", (order_id,))
+    conn.commit()
+    return {"success": True}
+
+@app.post("/api/admin/orders/{order_id}/cancel")
+async def admin_cancel_order(order_id: int):
+    cursor.execute("UPDATE orders SET status='cancelled' WHERE id=?", (order_id,))
+    conn.commit()
+    return {"success": True}
